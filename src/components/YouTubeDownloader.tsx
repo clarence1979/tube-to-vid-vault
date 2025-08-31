@@ -6,13 +6,16 @@ import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { VideoInfo } from './VideoInfo';
 import { Download, Youtube, Link, Sparkles } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface VideoData {
+  video_id: string;
   title: string;
-  thumbnail: string;
+  thumbnail_url: string;
   duration: string;
-  channelName: string;
+  channel_name: string;
   views: string;
+  description?: string;
 }
 
 export const YouTubeDownloader = () => {
@@ -56,65 +59,125 @@ export const YouTubeDownloader = () => {
     setIsLoading(true);
     setProgress(0);
 
-    // Simulate API call to get video info
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 90) {
-          clearInterval(interval);
-          return 90;
+    try {
+      // Call the YouTube processor edge function
+      const { data, error } = await supabase.functions.invoke('youtube-processor', {
+        body: {
+          action: 'get_video_info',
+          youtube_url: url
         }
-        return prev + 10;
       });
-    }, 200);
 
-    setTimeout(() => {
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to get video information');
+      }
+
       setProgress(100);
-      // Mock video data - in real app this would come from YouTube API
-      setVideoData({
-        title: "Sample YouTube Video Title - Amazing Content!",
-        thumbnail: "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
-        duration: "3:42",
-        channelName: "Sample Channel",
-        views: "1.2M"
-      });
+      setVideoData(data.video);
       setIsLoading(false);
       toast({
         title: "Video Found!",
         description: "Video information loaded successfully",
       });
-    }, 2000);
+    } catch (error) {
+      console.error('Error fetching video info:', error);
+      setIsLoading(false);
+      setProgress(0);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to fetch video information",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleDownload = async (format: 'mp4' | 'mp3') => {
+  const handleDownload = async (format: 'mp4' | 'mp3', quality: string = '720p') => {
+    if (!videoData) return;
+
     setIsDownloading(true);
     setProgress(0);
 
-    // Simulate download progress
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 95) {
-          clearInterval(interval);
-          return 95;
+    try {
+      // Initiate download via edge function
+      const { data, error } = await supabase.functions.invoke('youtube-processor', {
+        body: {
+          action: 'download_video',
+          youtube_url: url,
+          format,
+          quality
         }
-        return prev + 5;
       });
-    }, 100);
 
-    setTimeout(() => {
-      setProgress(100);
-      setIsDownloading(false);
-      toast({
-        title: "Download Complete!",
-        description: `Video downloaded as ${format.toUpperCase()} format`,
-      });
-      
-      // Reset after successful download
-      setTimeout(() => {
-        setVideoData(null);
-        setUrl('');
-        setProgress(0);
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to initiate download');
+      }
+
+      // Poll for download progress
+      const downloadId = data.download_id;
+      const progressInterval = setInterval(async () => {
+        try {
+          const { data: progressData, error: progressError } = await supabase
+            .from('download_requests')
+            .select('progress, status, download_url, error_message')
+            .eq('id', downloadId)
+            .single();
+
+          if (progressError) {
+            clearInterval(progressInterval);
+            throw new Error('Failed to check download progress');
+          }
+
+          setProgress(progressData.progress || 0);
+
+          if (progressData.status === 'completed') {
+            clearInterval(progressInterval);
+            setIsDownloading(false);
+            toast({
+              title: "Download Complete!",
+              description: `Video downloaded as ${format.toUpperCase()} format`,
+            });
+
+            // Reset after successful download
+            setTimeout(() => {
+              setVideoData(null);
+              setUrl('');
+              setProgress(0);
+            }, 2000);
+          } else if (progressData.status === 'failed') {
+            clearInterval(progressInterval);
+            throw new Error(progressData.error_message || 'Download failed');
+          }
+        } catch (error) {
+          clearInterval(progressInterval);
+          console.error('Error checking progress:', error);
+          setIsDownloading(false);
+          setProgress(0);
+          toast({
+            title: "Download Error",
+            description: error instanceof Error ? error.message : "Failed to download video",
+            variant: "destructive",
+          });
+        }
       }, 2000);
-    }, 3000);
+
+    } catch (error) {
+      console.error('Error initiating download:', error);
+      setIsDownloading(false);
+      setProgress(0);
+      toast({
+        title: "Download Error",
+        description: error instanceof Error ? error.message : "Failed to initiate download",
+        variant: "destructive",
+      });
+    }
   };
 
   return (

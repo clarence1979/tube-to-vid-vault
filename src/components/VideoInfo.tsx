@@ -2,30 +2,35 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Download, Play, Clock, Eye, User } from 'lucide-react';
+import { useState } from 'react';
 
 interface VideoData {
+  video_id: string;
   title: string;
-  thumbnail: string;
+  thumbnail_url: string;
   duration: string;
-  channelName: string;
+  channel_name: string;
   views: string;
+  description?: string;
 }
 
 interface VideoInfoProps {
   videoData: VideoData;
   isDownloading: boolean;
   progress: number;
-  onDownload: (format: 'mp4' | 'mp3') => void;
+  onDownload: (format: 'mp4' | 'mp3', quality?: string) => void;
 }
 
 export const VideoInfo = ({ videoData, isDownloading, progress, onDownload }: VideoInfoProps) => {
+  const [selectedQuality, setSelectedQuality] = useState('720p');
+
   return (
     <Card className="bg-gradient-card shadow-card border-0 overflow-hidden animate-pulse-glow">
       <CardContent className="p-0">
         {/* Video Preview */}
         <div className="relative aspect-video bg-muted">
           <img
-            src={videoData.thumbnail}
+            src={videoData.thumbnail_url}
             alt={videoData.title}
             className="w-full h-full object-cover"
             onError={(e) => {
@@ -51,7 +56,7 @@ export const VideoInfo = ({ videoData, isDownloading, progress, onDownload }: Vi
             <div className="flex items-center gap-4 text-sm text-muted-foreground">
               <div className="flex items-center gap-1">
                 <User className="h-4 w-4" />
-                <span>{videoData.channelName}</span>
+                <span>{videoData.channel_name}</span>
               </div>
               <div className="flex items-center gap-1">
                 <Eye className="h-4 w-4" />
@@ -77,7 +82,7 @@ export const VideoInfo = ({ videoData, isDownloading, progress, onDownload }: Vi
           {/* Download Buttons */}
           <div className="grid grid-cols-2 gap-3">
             <Button
-              onClick={() => onDownload('mp4')}
+              onClick={() => onDownload('mp4', selectedQuality)}
               disabled={isDownloading}
               className="bg-gradient-primary hover:shadow-hover transition-smooth group"
             >
@@ -86,7 +91,7 @@ export const VideoInfo = ({ videoData, isDownloading, progress, onDownload }: Vi
             </Button>
             
             <Button
-              onClick={() => onDownload('mp3')}
+              onClick={() => onDownload('mp3', selectedQuality)}
               disabled={isDownloading}
               variant="outline"
               className="hover:bg-primary hover:text-primary-foreground transition-smooth group"
@@ -98,14 +103,19 @@ export const VideoInfo = ({ videoData, isDownloading, progress, onDownload }: Vi
 
           {/* Quality Options */}
           <div className="flex flex-wrap gap-2 pt-2">
-            <span className="text-sm text-muted-foreground">Available qualities:</span>
+            <span className="text-sm text-muted-foreground">Quality:</span>
             {['1080p', '720p', '480p', '360p'].map((quality) => (
-              <span
+              <button
                 key={quality}
-                className="px-2 py-1 bg-muted rounded-full text-xs font-medium hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
+                onClick={() => setSelectedQuality(quality)}
+                className={`px-2 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+                  selectedQuality === quality
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted hover:bg-primary hover:text-primary-foreground'
+                }`}
               >
                 {quality}
-              </span>
+              </button>
             ))}
           </div>
         </div>
