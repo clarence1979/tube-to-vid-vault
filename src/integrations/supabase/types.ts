@@ -14,6 +14,72 @@ export type Database = {
   }
   public: {
     Tables: {
+      download_requests: {
+        Row: {
+          channel_name: string | null
+          completed_at: string | null
+          created_at: string
+          download_url: string | null
+          duration: string | null
+          error_message: string | null
+          file_size: number | null
+          format: string
+          id: string
+          progress: number | null
+          quality: string | null
+          status: string
+          thumbnail_url: string | null
+          title: string | null
+          updated_at: string
+          user_id: string | null
+          video_id: string
+          views: string | null
+          youtube_url: string
+        }
+        Insert: {
+          channel_name?: string | null
+          completed_at?: string | null
+          created_at?: string
+          download_url?: string | null
+          duration?: string | null
+          error_message?: string | null
+          file_size?: number | null
+          format: string
+          id?: string
+          progress?: number | null
+          quality?: string | null
+          status?: string
+          thumbnail_url?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string | null
+          video_id: string
+          views?: string | null
+          youtube_url: string
+        }
+        Update: {
+          channel_name?: string | null
+          completed_at?: string | null
+          created_at?: string
+          download_url?: string | null
+          duration?: string | null
+          error_message?: string | null
+          file_size?: number | null
+          format?: string
+          id?: string
+          progress?: number | null
+          quality?: string | null
+          status?: string
+          thumbnail_url?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string | null
+          video_id?: string
+          views?: string | null
+          youtube_url?: string
+        }
+        Relationships: []
+      }
       learning_sessions: {
         Row: {
           correct_answers: number | null
