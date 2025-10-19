@@ -102,7 +102,8 @@ export const YouTubeDownloader = () => {
     setProgress(0);
 
     try {
-      // Initiate download via edge function
+      setProgress(30);
+
       const { data, error } = await supabase.functions.invoke('youtube-processor', {
         body: {
           action: 'download_video',
@@ -117,55 +118,33 @@ export const YouTubeDownloader = () => {
       }
 
       if (!data.success) {
-        throw new Error(data.error || 'Failed to initiate download');
+        throw new Error(data.error || 'Failed to get download URL');
       }
 
-      // Poll for download progress
-      const downloadId = data.download_id;
-      const progressInterval = setInterval(async () => {
-        try {
-          const { data: progressData, error: progressError } = await supabase
-            .from('download_requests')
-            .select('progress, status, download_url, error_message')
-            .eq('id', downloadId)
-            .single();
+      setProgress(70);
 
-          if (progressError) {
-            clearInterval(progressInterval);
-            throw new Error('Failed to check download progress');
-          }
+      const downloadUrl = data.download_url;
+      const filename = data.filename || `video.${format}`;
 
-          setProgress(progressData.progress || 0);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
-          if (progressData.status === 'completed') {
-            clearInterval(progressInterval);
-            setIsDownloading(false);
-            toast({
-              title: "Download Complete!",
-              description: `Video downloaded as ${format.toUpperCase()} format`,
-            });
+      setProgress(100);
+      setIsDownloading(false);
 
-            // Reset after successful download
-            setTimeout(() => {
-              setVideoData(null);
-              setUrl('');
-              setProgress(0);
-            }, 2000);
-          } else if (progressData.status === 'failed') {
-            clearInterval(progressInterval);
-            throw new Error(progressData.error_message || 'Download failed');
-          }
-        } catch (error) {
-          clearInterval(progressInterval);
-          console.error('Error checking progress:', error);
-          setIsDownloading(false);
-          setProgress(0);
-          toast({
-            title: "Download Error",
-            description: error instanceof Error ? error.message : "Failed to download video",
-            variant: "destructive",
-          });
-        }
+      toast({
+        title: "Download Started!",
+        description: `Opening YouTube video in new tab. Use a browser extension to download as ${format.toUpperCase()}.`,
+      });
+
+      setTimeout(() => {
+        setProgress(0);
       }, 2000);
 
     } catch (error) {

@@ -1,10 +1,10 @@
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.56.0';
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from 'npm:@supabase/supabase-js@2.56.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
 const supabase = createClient(
@@ -12,30 +12,32 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 );
 
-serve(async (req) => {
-  // Handle CORS preflight requests
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders
+    });
   }
 
   try {
     const { action, youtube_url, format = 'mp4', quality = '720p' } = await req.json();
-    
+
     console.log('YouTube processor called with:', { action, youtube_url, format, quality });
 
     if (action === 'get_video_info') {
       return await getVideoInfo(youtube_url);
     } else if (action === 'download_video') {
-      return await initiateDownload(youtube_url, format, quality);
+      return await downloadVideo(youtube_url, format, quality);
     } else {
-      return new Response(JSON.stringify({ error: 'Invalid action' }), {
+      return new Response(JSON.stringify({ success: false, error: 'Invalid action' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
   } catch (error) {
     console.error('Error in youtube-processor function:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ success: false, error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -44,7 +46,6 @@ serve(async (req) => {
 
 async function getVideoInfo(youtubeUrl: string) {
   try {
-    // Extract video ID from URL
     const videoId = extractVideoId(youtubeUrl);
     if (!videoId) {
       throw new Error('Invalid YouTube URL');
@@ -55,7 +56,6 @@ async function getVideoInfo(youtubeUrl: string) {
       throw new Error('YouTube API key not configured');
     }
 
-    // Fetch video details from YouTube Data API
     const response = await fetch(
       `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${videoId}&key=${apiKey}`
     );
@@ -75,7 +75,6 @@ async function getVideoInfo(youtubeUrl: string) {
     const contentDetails = video.contentDetails;
     const statistics = video.statistics;
 
-    // Convert ISO 8601 duration to readable format
     const duration = parseDuration(contentDetails.duration);
     const views = formatViews(statistics.viewCount);
 
@@ -94,90 +93,59 @@ async function getVideoInfo(youtubeUrl: string) {
     });
   } catch (error) {
     console.error('Error getting video info:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ success: false, error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 }
 
-async function initiateDownload(youtubeUrl: string, format: string, quality: string) {
+async function downloadVideo(youtubeUrl: string, format: string, quality: string) {
   try {
     const videoId = extractVideoId(youtubeUrl);
     if (!videoId) {
       throw new Error('Invalid YouTube URL');
     }
 
-    // Create download request in database
-    const { data: downloadRequest, error } = await supabase
-      .from('download_requests')
-      .insert({
-        youtube_url: youtubeUrl,
-        video_id: videoId,
-        format,
-        quality,
-        status: 'pending',
-        progress: 0,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Database error:', error);
-      throw new Error('Failed to create download request');
+    const apiKey = Deno.env.get('YOUTUBE_API_KEY');
+    if (!apiKey) {
+      throw new Error('YouTube API key not configured');
     }
 
-    // Start background processing
-    processDownloadInBackground(downloadRequest.id, youtubeUrl, format, quality);
+    const response = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`
+    );
 
-    return new Response(JSON.stringify({ 
-      success: true, 
-      download_id: downloadRequest.id,
-      message: 'Download initiated successfully'
+    if (!response.ok) {
+      throw new Error(`YouTube API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (!data.items || data.items.length === 0) {
+      throw new Error('Video not found');
+    }
+
+    const video = data.items[0];
+    const title = video.snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+    const downloadUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+    return new Response(JSON.stringify({
+      success: true,
+      download_url: downloadUrl,
+      filename: `${title}.${format}`,
+      video_id: videoId
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Error initiating download:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    console.error('Error downloading video:', error);
+    return new Response(JSON.stringify({ success: false, error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-}
-
-function processDownloadInBackground(downloadId: string, youtubeUrl: string, format: string, quality: string) {
-  // Simulate download process with progress updates
-  setTimeout(async () => {
-    try {
-      // Update progress periodically
-      const progressSteps = [20, 40, 60, 80, 100];
-      
-      for (const progress of progressSteps) {
-        await supabase
-          .from('download_requests')
-          .update({ 
-            progress,
-            status: progress === 100 ? 'completed' : 'processing',
-            completed_at: progress === 100 ? new Date().toISOString() : null,
-            download_url: progress === 100 ? `https://example.com/downloads/${downloadId}.${format}` : null
-          })
-          .eq('id', downloadId);
-
-        // Wait between updates
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    } catch (error) {
-      console.error('Error processing download:', error);
-      await supabase
-        .from('download_requests')
-        .update({ 
-          status: 'failed',
-          error_message: error.message 
-        })
-        .eq('id', downloadId);
-    }
-  }, 1000);
 }
 
 function extractVideoId(url: string): string | null {
