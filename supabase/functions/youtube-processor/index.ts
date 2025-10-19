@@ -110,9 +110,7 @@ async function downloadVideo(youtubeUrl: string, format: string, quality: string
     let videoTitle = `video_${videoId}`;
 
     const ytApiKey = Deno.env.get('YOUTUBE_API_KEY');
-    const rapidApiKey = Deno.env.get('RAPIDAPI_KEY');
-
-    if (ytApiKey && rapidApiKey) {
+    if (ytApiKey) {
       try {
         const response = await fetch(
           `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${ytApiKey}`
@@ -122,80 +120,138 @@ async function downloadVideo(youtubeUrl: string, format: string, quality: string
           const data = await response.json();
           if (data.items && data.items.length > 0) {
             const video = data.items[0];
-            videoTitle = video.snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-
-            const downloadApiUrl = `https://youtube-mp36.p.rapidapi.com/dl?id=${videoId}`;
-
-            const downloadResponse = await fetch(downloadApiUrl, {
-              method: 'GET',
-              headers: {
-                'X-RapidAPI-Key': rapidApiKey,
-                'X-RapidAPI-Host': 'youtube-mp36.p.rapidapi.com'
-              }
-            });
-
-            if (downloadResponse.ok) {
-              const downloadData = await downloadResponse.json();
-
-              if (downloadData.link) {
-                return new Response(JSON.stringify({
-                  success: true,
-                  download_url: downloadData.link,
-                  filename: `${videoTitle}.${format}`,
-                  video_id: videoId,
-                  title: video.snippet.title
-                }), {
-                  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                });
-              }
-            }
+            videoTitle = video.snippet.title.replace(/[^a-z0-9\s]/gi, '_').replace(/\s+/g, '_').toLowerCase();
           }
         }
       } catch (apiError) {
-        console.log('RapidAPI failed, falling back to Cobalt:', apiError);
+        console.log('Failed to fetch video title:', apiError);
       }
     }
 
-    const ytdlApiUrl = `https://co.wuk.sh/api/json`;
+    const downloadApiUrl = `https://youtube-video-download-info.p.rapidapi.com/dl?id=${videoId}`;
 
-    const cobaltResponse = await fetch(ytdlApiUrl, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: youtubeUrl,
-        vQuality: quality === '1080p' ? '1080' : quality === '480p' ? '480' : '720',
-        filenamePattern: 'basic',
-        isAudioOnly: format === 'mp3'
-      })
-    });
+    try {
+      const rapidApiKey = Deno.env.get('RAPIDAPI_KEY');
+      if (rapidApiKey) {
+        const downloadResponse = await fetch(downloadApiUrl, {
+          method: 'GET',
+          headers: {
+            'X-RapidAPI-Key': rapidApiKey,
+            'X-RapidAPI-Host': 'youtube-video-download-info.p.rapidapi.com'
+          }
+        });
 
-    if (!cobaltResponse.ok) {
-      const errorText = await cobaltResponse.text();
-      console.error('Cobalt API error:', errorText);
-      throw new Error(`Failed to get download link from Cobalt API: ${cobaltResponse.status}`);
+        if (downloadResponse.ok) {
+          const downloadData = await downloadResponse.json();
+
+          if (downloadData.link && Array.isArray(downloadData.link)) {
+            let selectedLink = null;
+
+            if (format === 'mp3') {
+              selectedLink = downloadData.link.find((link: any) =>
+                link.f === 'mp3' || link.q === 'highestaudio'
+              );
+            } else {
+              const qualityMap: { [key: string]: string } = {
+                '1080p': '1080',
+                '720p': '720',
+                '480p': '480',
+                '360p': '360'
+              };
+
+              const targetQuality = qualityMap[quality] || '720';
+              selectedLink = downloadData.link.find((link: any) =>
+                link.q === targetQuality || link.q === `${targetQuality}p`
+              );
+
+              if (!selectedLink) {
+                selectedLink = downloadData.link.find((link: any) =>
+                  link.f === 'mp4' && (link.q === '720' || link.q === '720p')
+                );
+              }
+
+              if (!selectedLink) {
+                selectedLink = downloadData.link.find((link: any) => link.f === 'mp4');
+              }
+            }
+
+            if (selectedLink && selectedLink.link) {
+              return new Response(JSON.stringify({
+                success: true,
+                download_url: selectedLink.link,
+                filename: `${videoTitle}.${format}`,
+                video_id: videoId,
+                title: videoTitle
+              }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+          }
+        }
+      }
+    } catch (rapidError) {
+      console.log('RapidAPI failed, using fallback:', rapidError);
     }
 
-    const cobaltData = await cobaltResponse.json();
-    console.log('Cobalt response:', cobaltData);
+    const invidousInstances = [
+      'https://invidious.privacyredirect.com',
+      'https://yewtu.be',
+      'https://invidious.snopyta.org'
+    ];
 
-    if (cobaltData.status === 'redirect' || cobaltData.status === 'stream') {
-      const downloadUrl = cobaltData.url;
-      const filename = `${videoTitle}.${format}`;
+    for (const instance of invidousInstances) {
+      try {
+        const invidiousUrl = `${instance}/api/v1/videos/${videoId}`;
+        const invidiousResponse = await fetch(invidiousUrl);
 
-      return new Response(JSON.stringify({
-        success: true,
-        download_url: downloadUrl,
-        filename: filename,
-        video_id: videoId
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+        if (invidiousResponse.ok) {
+          const invidiousData = await invidiousResponse.json();
+
+          let selectedFormat = null;
+
+          if (format === 'mp3') {
+            const audioFormats = invidiousData.adaptiveFormats?.filter((f: any) =>
+              f.type?.includes('audio')
+            ) || [];
+            selectedFormat = audioFormats[0];
+          } else {
+            const videoFormats = invidiousData.formatStreams || [];
+
+            const qualityMap: { [key: string]: string } = {
+              '1080p': '1080p',
+              '720p': '720p',
+              '480p': '480p',
+              '360p': '360p'
+            };
+
+            selectedFormat = videoFormats.find((f: any) =>
+              f.qualityLabel === qualityMap[quality] || f.quality === quality
+            );
+
+            if (!selectedFormat && videoFormats.length > 0) {
+              selectedFormat = videoFormats[0];
+            }
+          }
+
+          if (selectedFormat && selectedFormat.url) {
+            return new Response(JSON.stringify({
+              success: true,
+              download_url: selectedFormat.url,
+              filename: `${videoTitle}.${format}`,
+              video_id: videoId,
+              title: videoTitle
+            }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+        }
+      } catch (invidiousError) {
+        console.log(`Failed to fetch from ${instance}:`, invidiousError);
+        continue;
+      }
     }
 
-    throw new Error(`Unable to generate download link. Cobalt status: ${cobaltData.status}`);
+    throw new Error('Unable to generate download link. Please try again later or use a different video.');
   } catch (error) {
     console.error('Error downloading video:', error);
     return new Response(JSON.stringify({ success: false, error: error.message }), {

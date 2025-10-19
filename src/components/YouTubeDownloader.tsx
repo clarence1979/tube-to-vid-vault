@@ -30,7 +30,9 @@ export const YouTubeDownloader = () => {
     const patterns = [
       /^https?:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]+/,
       /^https?:\/\/youtu\.be\/[\w-]+/,
-      /^https?:\/\/(www\.)?youtube\.com\/embed\/[\w-]+/
+      /^https?:\/\/(www\.)?youtube\.com\/embed\/[\w-]+/,
+      /^https?:\/\/m\.youtube\.com\/watch\?v=[\w-]+/,
+      /^https?:\/\/(www\.)?youtube\.com\/v\/[\w-]+/
     ];
     return patterns.some(pattern => pattern.test(url));
   };
@@ -108,6 +110,8 @@ export const YouTubeDownloader = () => {
         description: "Getting download link for your video",
       });
 
+      console.log('Requesting download with:', { url, format, quality });
+
       const { data, error } = await supabase.functions.invoke('youtube-processor', {
         body: {
           action: 'download_video',
@@ -117,11 +121,15 @@ export const YouTubeDownloader = () => {
         }
       });
 
+      console.log('Edge function response:', { data, error });
+
       if (error) {
-        throw new Error(error.message);
+        console.error('Supabase function error:', error);
+        throw new Error(error.message || 'Failed to connect to download service');
       }
 
       if (!data.success) {
+        console.error('Download failed:', data.error);
         throw new Error(data.error || 'Failed to get download URL');
       }
 
@@ -130,35 +138,32 @@ export const YouTubeDownloader = () => {
       const downloadUrl = data.download_url;
       const filename = data.filename || `video.${format}`;
 
-      setProgress(80);
+      console.log('Download URL obtained:', downloadUrl);
 
-      const response = await fetch(downloadUrl);
-      if (!response.ok) {
-        throw new Error('Failed to fetch video file');
-      }
+      setProgress(70);
 
-      const blob = await response.blob();
-
-      setProgress(95);
-
-      const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = blobUrl;
+      link.href = downloadUrl;
       link.download = filename;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
       document.body.appendChild(link);
+
+      setProgress(90);
+
       link.click();
+
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
 
       setProgress(100);
-      setIsDownloading(false);
 
       toast({
-        title: "Download Complete!",
-        description: `Your video has been downloaded as ${filename}`,
+        title: "Download Started!",
+        description: `Your ${format.toUpperCase()} download has started`,
       });
 
       setTimeout(() => {
+        setIsDownloading(false);
         setProgress(0);
       }, 2000);
 
@@ -166,9 +171,20 @@ export const YouTubeDownloader = () => {
       console.error('Error downloading video:', error);
       setIsDownloading(false);
       setProgress(0);
+
+      let errorMessage = "Failed to download video";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        if (error.message.includes('CORS')) {
+          errorMessage = 'Download blocked by browser security. Please try a different video or quality.';
+        } else if (error.message.includes('network')) {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+        }
+      }
+
       toast({
         title: "Download Error",
-        description: error instanceof Error ? error.message : "Failed to download video",
+        description: errorMessage,
         variant: "destructive",
       });
     }
