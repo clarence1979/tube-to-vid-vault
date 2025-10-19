@@ -156,7 +156,7 @@ async function downloadVideo(youtubeUrl: string, format: string, quality: string
       }
     }
 
-    const ytdlApiUrl = `https://api.cobalt.tools/api/json`;
+    const ytdlApiUrl = `https://co.wuk.sh/api/json`;
 
     const cobaltResponse = await fetch(ytdlApiUrl, {
       method: 'POST',
@@ -173,10 +173,13 @@ async function downloadVideo(youtubeUrl: string, format: string, quality: string
     });
 
     if (!cobaltResponse.ok) {
-      throw new Error('Failed to get download link from Cobalt API');
+      const errorText = await cobaltResponse.text();
+      console.error('Cobalt API error:', errorText);
+      throw new Error(`Failed to get download link from Cobalt API: ${cobaltResponse.status}`);
     }
 
     const cobaltData = await cobaltResponse.json();
+    console.log('Cobalt response:', cobaltData);
 
     if (cobaltData.status === 'redirect' || cobaltData.status === 'stream') {
       const downloadUrl = cobaltData.url;
@@ -192,7 +195,7 @@ async function downloadVideo(youtubeUrl: string, format: string, quality: string
       });
     }
 
-    throw new Error('Unable to generate download link');
+    throw new Error(`Unable to generate download link. Cobalt status: ${cobaltData.status}`);
   } catch (error) {
     console.error('Error downloading video:', error);
     return new Response(JSON.stringify({ success: false, error: error.message }), {
