@@ -107,38 +107,91 @@ async function downloadVideo(youtubeUrl: string, format: string, quality: string
       throw new Error('Invalid YouTube URL');
     }
 
-    const apiKey = Deno.env.get('YOUTUBE_API_KEY');
-    if (!apiKey) {
-      throw new Error('YouTube API key not configured');
+    const ytApiKey = Deno.env.get('YOUTUBE_API_KEY');
+    if (ytApiKey) {
+      const response = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${ytApiKey}`
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          const video = data.items[0];
+          const title = video.snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+          const downloadApiUrl = `https://youtube-mp36.p.rapidapi.com/dl?id=${videoId}`;
+
+          const rapidApiKey = Deno.env.get('RAPIDAPI_KEY');
+          if (!rapidApiKey) {
+            throw new Error('RapidAPI key not configured');
+          }
+
+          const downloadResponse = await fetch(downloadApiUrl, {
+            method: 'GET',
+            headers: {
+              'X-RapidAPI-Key': rapidApiKey,
+              'X-RapidAPI-Host': 'youtube-mp36.p.rapidapi.com'
+            }
+          });
+
+          if (!downloadResponse.ok) {
+            throw new Error('Failed to get download link from API');
+          }
+
+          const downloadData = await downloadResponse.json();
+
+          if (downloadData.link) {
+            return new Response(JSON.stringify({
+              success: true,
+              download_url: downloadData.link,
+              filename: `${title}.${format}`,
+              video_id: videoId,
+              title: video.snippet.title
+            }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+        }
+      }
     }
 
-    const response = await fetch(
-      `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`
-    );
+    const ytdlApiUrl = `https://api.cobalt.tools/api/json`;
 
-    if (!response.ok) {
-      throw new Error(`YouTube API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (!data.items || data.items.length === 0) {
-      throw new Error('Video not found');
-    }
-
-    const video = data.items[0];
-    const title = video.snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-
-    const downloadUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-    return new Response(JSON.stringify({
-      success: true,
-      download_url: downloadUrl,
-      filename: `${title}.${format}`,
-      video_id: videoId
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    const cobaltResponse = await fetch(ytdlApiUrl, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: youtubeUrl,
+        vQuality: quality === '1080p' ? '1080' : quality === '480p' ? '480' : '720',
+        filenamePattern: 'basic',
+        isAudioOnly: format === 'mp3'
+      })
     });
+
+    if (!cobaltResponse.ok) {
+      throw new Error('Failed to get download link');
+    }
+
+    const cobaltData = await cobaltResponse.json();
+
+    if (cobaltData.status === 'redirect' || cobaltData.status === 'stream') {
+      const downloadUrl = cobaltData.url;
+      const filename = `video_${videoId}.${format}`;
+
+      return new Response(JSON.stringify({
+        success: true,
+        download_url: downloadUrl,
+        filename: filename,
+        video_id: videoId
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    throw new Error('Unable to generate download link');
   } catch (error) {
     console.error('Error downloading video:', error);
     return new Response(JSON.stringify({ success: false, error: error.message }), {

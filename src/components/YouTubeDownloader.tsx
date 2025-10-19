@@ -102,7 +102,11 @@ export const YouTubeDownloader = () => {
     setProgress(0);
 
     try {
-      setProgress(30);
+      setProgress(20);
+      toast({
+        title: "Processing...",
+        description: "Getting download link for your video",
+      });
 
       const { data, error } = await supabase.functions.invoke('youtube-processor', {
         body: {
@@ -121,26 +125,37 @@ export const YouTubeDownloader = () => {
         throw new Error(data.error || 'Failed to get download URL');
       }
 
-      setProgress(70);
+      setProgress(60);
 
       const downloadUrl = data.download_url;
       const filename = data.filename || `video.${format}`;
 
+      setProgress(80);
+
+      const response = await fetch(downloadUrl);
+      if (!response.ok) {
+        throw new Error('Failed to fetch video file');
+      }
+
+      const blob = await response.blob();
+
+      setProgress(95);
+
+      const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = downloadUrl;
+      link.href = blobUrl;
       link.download = filename;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
 
       setProgress(100);
       setIsDownloading(false);
 
       toast({
-        title: "Download Started!",
-        description: `Opening YouTube video in new tab. Use a browser extension to download as ${format.toUpperCase()}.`,
+        title: "Download Complete!",
+        description: `Your video has been downloaded as ${filename}`,
       });
 
       setTimeout(() => {
@@ -148,12 +163,12 @@ export const YouTubeDownloader = () => {
       }, 2000);
 
     } catch (error) {
-      console.error('Error initiating download:', error);
+      console.error('Error downloading video:', error);
       setIsDownloading(false);
       setProgress(0);
       toast({
         title: "Download Error",
-        description: error instanceof Error ? error.message : "Failed to initiate download",
+        description: error instanceof Error ? error.message : "Failed to download video",
         variant: "destructive",
       });
     }
