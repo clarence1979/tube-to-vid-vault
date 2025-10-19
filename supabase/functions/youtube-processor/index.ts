@@ -107,51 +107,52 @@ async function downloadVideo(youtubeUrl: string, format: string, quality: string
       throw new Error('Invalid YouTube URL');
     }
 
+    let videoTitle = `video_${videoId}`;
+
     const ytApiKey = Deno.env.get('YOUTUBE_API_KEY');
-    if (ytApiKey) {
-      const response = await fetch(
-        `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${ytApiKey}`
-      );
+    const rapidApiKey = Deno.env.get('RAPIDAPI_KEY');
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.items && data.items.length > 0) {
-          const video = data.items[0];
-          const title = video.snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    if (ytApiKey && rapidApiKey) {
+      try {
+        const response = await fetch(
+          `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${ytApiKey}`
+        );
 
-          const downloadApiUrl = `https://youtube-mp36.p.rapidapi.com/dl?id=${videoId}`;
+        if (response.ok) {
+          const data = await response.json();
+          if (data.items && data.items.length > 0) {
+            const video = data.items[0];
+            videoTitle = video.snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
-          const rapidApiKey = Deno.env.get('RAPIDAPI_KEY');
-          if (!rapidApiKey) {
-            throw new Error('RapidAPI key not configured');
-          }
+            const downloadApiUrl = `https://youtube-mp36.p.rapidapi.com/dl?id=${videoId}`;
 
-          const downloadResponse = await fetch(downloadApiUrl, {
-            method: 'GET',
-            headers: {
-              'X-RapidAPI-Key': rapidApiKey,
-              'X-RapidAPI-Host': 'youtube-mp36.p.rapidapi.com'
-            }
-          });
-
-          if (!downloadResponse.ok) {
-            throw new Error('Failed to get download link from API');
-          }
-
-          const downloadData = await downloadResponse.json();
-
-          if (downloadData.link) {
-            return new Response(JSON.stringify({
-              success: true,
-              download_url: downloadData.link,
-              filename: `${title}.${format}`,
-              video_id: videoId,
-              title: video.snippet.title
-            }), {
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            const downloadResponse = await fetch(downloadApiUrl, {
+              method: 'GET',
+              headers: {
+                'X-RapidAPI-Key': rapidApiKey,
+                'X-RapidAPI-Host': 'youtube-mp36.p.rapidapi.com'
+              }
             });
+
+            if (downloadResponse.ok) {
+              const downloadData = await downloadResponse.json();
+
+              if (downloadData.link) {
+                return new Response(JSON.stringify({
+                  success: true,
+                  download_url: downloadData.link,
+                  filename: `${videoTitle}.${format}`,
+                  video_id: videoId,
+                  title: video.snippet.title
+                }), {
+                  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                });
+              }
+            }
           }
         }
+      } catch (apiError) {
+        console.log('RapidAPI failed, falling back to Cobalt:', apiError);
       }
     }
 
@@ -172,14 +173,14 @@ async function downloadVideo(youtubeUrl: string, format: string, quality: string
     });
 
     if (!cobaltResponse.ok) {
-      throw new Error('Failed to get download link');
+      throw new Error('Failed to get download link from Cobalt API');
     }
 
     const cobaltData = await cobaltResponse.json();
 
     if (cobaltData.status === 'redirect' || cobaltData.status === 'stream') {
       const downloadUrl = cobaltData.url;
-      const filename = `video_${videoId}.${format}`;
+      const filename = `${videoTitle}.${format}`;
 
       return new Response(JSON.stringify({
         success: true,
